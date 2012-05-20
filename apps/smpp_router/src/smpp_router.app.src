@@ -1,0 +1,16 @@
+{
+	application, smpp_router,
+	[
+		{description, "Router for SMPP protocol"},
+		{vsn, "1"},
+		{registered, []},
+		{applications, [
+			kernel,
+			stdlib,
+			gproc
+		]},
+		{mod, { smpp_router_app, []}},
+		{env, [
+		]}
+	]
+}.
