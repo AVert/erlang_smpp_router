@@ -1,11 +1,14 @@
 {application, smpp_router,
  [
-  {description, ""},
+  {description, "SMPP Router written with erlang"},
   {vsn, "1"},
   {registered, []},
   {applications, [
                   kernel,
                   stdlib,
+                  sasl,
+                  mnesia,
+                  log4erl,
                   gproc
                  ]},
   {mod, { smpp_router_app, []}},
