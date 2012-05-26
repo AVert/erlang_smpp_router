@@ -1,6 +1,7 @@
-.eunit
-deps
-priv
-*.o
+apps/*/ebin/
 *.beam
-*.plt
+deps/*
+.project
+.settings
+rel/smpp_router
+erl_crash.dump
