@@ -1,6 +1,8 @@
 -module(incoming_connection).
 -behaviour(gen_smsc).
 
+-include("records.hrl").
+
 -export(
 	[
 		init/1, 

@@ -5,6 +5,8 @@
 %% Application callbacks
 -export([start/2, stop/1, init_db_tables/0]).
 
+-include("records.hrl").
+
 %% ===================================================================
 %% Application callbacks
 %% ===================================================================
@@ -17,5 +19,12 @@ stop(_State) ->
     ok.
 
 init_db_tables()->
-	mnesia:create_table(smpp_router_links,[]),
-	mnesia:create_table(smpp_router_messages,[]).
+	mnesia:create_schema([node()]),
+	mnesia:start(),
+	mnesia:create_table(
+		link,
+		[
+			{attributes, record_info(fields, link)},
+			{disc_copies, [node()]}
+		]
+	).

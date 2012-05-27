@@ -7,7 +7,6 @@
                   kernel,
                   stdlib,
                   sasl,
-                  mnesia,
                   log4erl,
                   gproc
                  ]},

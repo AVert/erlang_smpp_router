@@ -24,5 +24,13 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
+	ProcessFun = fun(Element, Acc)->
+		io:format("~p",[Element]),
+		Acc ++ [Element]
+	end,
+	TransactionFun = fun()->
+		mnesia:foldl(ProcessFun, [], link)
+	end,
+	mnesia:transaction(TransactionFun),
     {ok, { {one_for_one, 5, 10}, []} }.
 
