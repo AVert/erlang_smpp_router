@@ -20,3 +20,7 @@ Installation
  * $ vim rel/smpp_router/etc/app.config
  * $ rel/smpp_router/bin/smpp_router start
 
+Limitations
+===========
+
+This project is not a full featured router. It's just smpp multiplexer.
