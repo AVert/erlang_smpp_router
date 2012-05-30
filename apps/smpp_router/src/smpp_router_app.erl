@@ -13,6 +13,7 @@
 
 start(_StartType, _StartArgs) ->
 	init_db_tables(),
+	log4erl:change_format(file, {}),
     smpp_router_sup:start_link().
 
 stop(_State) ->

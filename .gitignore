@@ -5,3 +5,4 @@ deps/*
 .settings
 rel/smpp_router
 erl_crash.dump
+run.sh

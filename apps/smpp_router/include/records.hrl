@@ -2,7 +2,8 @@
 	link,
 	{
 		id,
-		connection_data
+		connection_data,
+		type
 	}
 ).
 
