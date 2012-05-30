@@ -18,3 +18,13 @@
 		%% here could be other options such as destination address ton npi etc
 	}
 ).
+
+-record(
+	connection_state,
+	{
+		bind_type :: 'undefined'|'transmitter'|'transceiver'|'receiver',
+		sessions,
+		submit_sm_count,
+		deliver_sm_count
+	}
+).

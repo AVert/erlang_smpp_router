@@ -1,6 +1,14 @@
 -module(esme).
 -behaviour(gen_esme).
 
+-include("records.hrl").
+
+-export(
+	[
+		start_link/2
+	]
+).
+
 -export(
 	[
 		init/1, 
@@ -22,8 +30,12 @@
 	]
 ).
 
+start_link(Name, Params)->
+	gen_esme:start_link({local, Name}, ?MODULE, Params, []).
+
 init([])->
-	{ok}.
+	State = #connection_state{},
+	{ok, State}.
 
 %% gen_esme functions
 handle_alert_notification(_,_)->

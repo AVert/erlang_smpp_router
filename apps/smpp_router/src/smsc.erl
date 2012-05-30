@@ -5,6 +5,12 @@
 
 -export(
 	[
+		start_link/2
+	]
+).
+
+-export(
+	[
 		init/1, 
 		code_change/3,
 		terminate/2,
@@ -22,8 +28,12 @@
 	]
 ).
 
+start_link(Name, Params)->
+	gen_smsc:start_link({local, Name}, ?MODULE, Params, []).
+
 init([])->
-	{ok}.
+	State = #connection_state{},
+	{ok, State}.
 
 %% gen_smsc functions
 handle_operation(_,_,_)->
