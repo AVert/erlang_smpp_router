@@ -3,7 +3,7 @@
 	{
 		id,
 		connection_data,
-		type
+		type :: 'in' | 'out'
 	}
 ).
 
@@ -25,6 +25,8 @@
 		bind_type :: 'undefined'|'transmitter'|'transceiver'|'receiver',
 		sessions,
 		submit_sm_count,
-		deliver_sm_count
+		deliver_sm_count,
+		active :: 'true' | 'false',
+		link
 	}
 ).
