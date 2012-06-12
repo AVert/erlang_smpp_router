@@ -7,8 +7,7 @@
                   kernel,
                   stdlib,
                   sasl,
-                  log4erl,
-                  gproc
+                  log4erl
                  ]},
   {mod, { smpp_router_app, []}},
   {env, []}

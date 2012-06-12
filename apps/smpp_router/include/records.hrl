@@ -3,7 +3,8 @@
 	{
 		id,
 		connection_data,
-		type :: 'in' | 'out'
+		type :: 'in' | 'out',
+		log_level :: 'error'|'info'|'debug'
 	}
 ).
 
@@ -23,10 +24,30 @@
 	connection_state,
 	{
 		bind_type :: 'undefined'|'transmitter'|'transceiver'|'receiver',
-		sessions,
+		sessions, 
 		submit_sm_count,
 		deliver_sm_count,
 		active :: 'true' | 'false',
-		link
+		link,
+		logger,
+		rules
+	}
+).
+
+-record(
+	rule,
+	{
+	 	id,
+		in_id,
+		type,
+		out_id
+	}
+).
+
+-record(
+	message,
+	{
+		id,
+		pdu
 	}
 ).

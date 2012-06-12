@@ -3,7 +3,7 @@
 
 -include("records.hrl").
 -include_lib("oserl/include/oserl.hrl").
--compile({parse_transform, logger_transform}).
+-include("logger.hrl").
 
 -export(
 	[
@@ -31,53 +31,84 @@
 ).
 
 start_link(Params)->
-	gen_smsc:start_link(?MODULE, Params, []).
+	{ok, Pid} = gen_smsc:start_link(?MODULE, Params, []),
+	Id = proplists:get_value(id, Params),
+	Name = lists:flatten(["channel_", Id]),
+	register(list_to_atom(Name), Pid),
+	{ok, Pid}.
 
 init(Params)->
 	Id = proplists:get_value(id, Params),
-	logger_transform:add_logger(?MODULE, Id),
+	Logger = logger_transform:add_logger(?MODULE, Id),
 	[Link] = mnesia:dirty_read(link, Id),
+	?DEBUG(Logger,"Link options ~p",[Link]),
+	Guard = #rule{id ='_', in_id = Id, out_id = '_', type = '_'},
+	Rules = mnesia:dirty_match_object(rule, Guard),
+	?DEBUG(Logger, "Got rules ~p",[Rules]),
 	State = #connection_state{
-		link = Link
+		link = Link,
+		logger = Logger,
+		rules = Rules
 	},
 	Self = self(),
 	spawn(
 		fun()->
-			Result = gen_smsc:listen_start(Self, Link#link.connection_data#connection_data.port, infinity, ?DEFAULT_SMPP_TIMERS),
+			Connection_data = Link#link.connection_data,
+			Port = Connection_data#connection_data.port,
+			Result = gen_smsc:listen_start(Self, Port, infinity, ?DEFAULT_SMPP_TIMERS),
+			?DEBUG(Logger, "Start listening on port ~p with result ~p",[Port, Result]),
 			gen_smsc:cast(Self, {listen, Result})
 		end
 	),
 	{ok, State}.
 
 %% gen_smsc functions
-handle_operation({CmdName, _Session, _Pdu},_From,State)->
-	log4erl:debug(smsc_1,"Got operation~p~n",[CmdName]),
-	{reply, {ok, [{message_id, integer_to_list(1)}]}, State}.
+handle_operation({CmdName, _Session, Pdu},From,#connection_state{logger=Logger, rules=Rules} = State)->
+	?DEBUG(Logger, "Got operation ~p with ~p",[CmdName, dict:to_list(Pdu)]),
+	spawn(
+		fun()->
+			router:route(CmdName, Pdu, Rules, From)
+		end
+	),
+	{noreply, State}.
 
-handle_unbind({unbind, _Session, _Pdu}, _From, State) -> 
-    {reply, ok, State}.
+handle_unbind({unbind, _Session, _Pdu}, _From, #connection_state{logger=Logger} = State) -> 
+	?INFO(Logger, "Got unbind"),
+	NewState = State#connection_state{active=false},
+    {reply, ok, NewState}.
 
 handle_bind({_CmdName, _Session, Pdu, _IpAddr}, _From, State)->
-	Link = State#connection_state.link,
-	ConnectionData = Link#link.connection_data, 
+	#connection_state{
+		link=Link,
+		logger = Logger
+	} = State,
+	#link{
+		connection_data = ConnectionData
+	} = Link,
 	SystemId = ConnectionData#connection_data.system_id,
 	Password = ConnectionData#connection_data.password,
 	BindParams = dict:to_list(Pdu),
+	
+	?DEBUG(Logger, "Got bind packet with ~p",[BindParams]),
+	
 	BindAuth = {
 		proplists:get_value(system_id, BindParams),
 		proplists:get_value(password, BindParams)
 	},
 	case BindAuth of
 		{SystemId, Password} ->
+			
 			Result = {ok, [{system_id, SystemId},{password, Password}]};
 		_ ->
 			Result = {error, ?ESME_RINVSYSID, []}
 	end,
-	log4erl:debug(smsc_1,"Bind attempt with ~p",[Result]),
+	?DEBUG(Logger, "Bind attempt with ~p",[Result]),
 	{reply, Result, State}.
 
-handle_listen_error(State) ->
-    {noreply, State}.
+handle_listen_error(#connection_state{logger = Logger} =State) ->
+	?INFO(Logger, "Got listen error"),
+	NewState = State#connection_state{active=false},
+    {noreply, NewState}.
 
 %% gen_server functions
 handle_cast({listen, Activity}, State)->
