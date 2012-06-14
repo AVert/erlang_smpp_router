@@ -146,3 +146,17 @@ get_rule(Link, CmdName)->
 %%	
 %%	io:format("Reply with ~p~n",[Res]),
 %%	ok.
+
+
+
+
+send_packet(smsc, esme, Session, submit_sm, Params)->
+	gen_esme:submit_sm(Session, Params);
+send_packet(smsc, smsc, Session, submit_sm, Params)->
+	gen_smsc:deliver_sm(Session, Params);
+send_packet(esme, esme, Session, deliver_sm, Params)->
+	gen_esme:submit_sm(Session, Params);
+send_packet(esme, smsc, Session, deliver_sm, Params)->
+	gen_esme:deliver_sm(Session, Params).
+
+
