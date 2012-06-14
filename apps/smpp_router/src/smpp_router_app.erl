@@ -19,7 +19,7 @@ start(_StartType, _StartArgs) ->
 	?DEBUG(?MODULE, "Tables initialized"),
 	add_dummy_connections(),
 	?DEBUG(?MODULE, "Added dummy connections"),
-    Sup = smpp_router_sup:start_link(),
+	Sup = smpp_router_sup:start_link(),
 	?DEBUG(?MODULE, "Started dummy supervisor with ~p",[Sup]),
 	smpp_router_sup:add_smsc([{id,1}]),
 	?DEBUG(?MODULE, "Added smsc with id 1"),
@@ -34,8 +34,11 @@ stop(_State) ->
 
 init_logger()->
 	log4erl:add_logger(?MODULE),
-	log4erl:add_file_appender(?MODULE, file,{"log", atom_to_list(?MODULE), {size, 100000}, 4, "elog", debug}),
-	log4erl:change_format(?MODULE, file, "%Y-%M-%D %T [%L] %l%n").
+	log4erl:add_file_appender(?MODULE, ?MODULE,{"log", atom_to_list(?MODULE), {size, 100000}, 4, "elog", debug}),
+	log4erl:change_format(?MODULE, file, "%Y-%M-%D %T [%L] %l%n"),
+	log4erl:add_logger(router),
+	log4erl:add_file_appender(router, router,{"log", "router", {size, 100000}, 4, "elog", debug}),
+	log4erl:change_format(router, router, "%Y-%M-%D %T [%L] %l%n").
 
 init_db_tables()->
 	mnesia:create_schema([node()]),
@@ -44,6 +47,13 @@ init_db_tables()->
 		link,
 		[
 			{attributes, record_info(fields, link)},
+			{disc_copies, [node()]}
+		]
+	),
+	mnesia:create_table(
+		message,
+		[
+			{attributes, record_info(fields, message)},
 			{disc_copies, [node()]}
 		]
 	),
@@ -96,13 +106,22 @@ add_dummy_connections()->
 		id = 1,
 		in_id = 1,
 		type = submit_sm,
-		out_id = 3
+		out_id = 3,
+		action = drop
 	},
 	mnesia:dirty_write(rule, R),
 	R1 = #rule{
 		id = 2,
+		in_id = 2,
+		type = submit_sm,
+		out_id = 3,
+		action = pass
+	},
+	mnesia:dirty_write(rule, R1),
+	R2 = #rule{
+		id = 3,
 		in_id = 3,
 		type = deliver_sm,
-		out_id = 2
+		action = drop
 	},
-	mnesia:dirty_write(rule, R1).
+	mnesia:dirty_write(rule, R2).

@@ -6,7 +6,9 @@
 
 -export(
 	[
-		start_link/1
+		start_link/1,
+		get_session/1,
+		bind/3
 	]
 ).
 
@@ -32,11 +34,13 @@
 ).
 
 start_link(Params)->
-	{ok, Pid} = gen_esme:start_link(?MODULE, Params, []),
 	Id = proplists:get_value(id, Params),
-	Name = lists:flatten(["channel_", Id]),
-	register(list_to_atom(Name), Pid),
-	{ok, Pid}.
+	Name = lists:flatten(["channel_", integer_to_list(Id)]),
+	NameA = list_to_atom(Name),
+	gen_esme:start_link({local, NameA},?MODULE, Params, []).
+
+get_session(Pid)->
+	gen_esme:call(Pid, get_session).
 
 init(Params)->
 	Id = proplists:get_value(id, Params),
@@ -48,7 +52,7 @@ init(Params)->
 		logger = Logger
 	},
 	Self = self(),
-	spawn_link(fun()-> bind(Self, Link, Logger) end),
+	spawn(fun()-> bind(Self, Link, Logger) end),
 	{ok, State}.
 
 %% gen_esme functions
@@ -58,9 +62,16 @@ handle_alert_notification(_,_)->
 handle_outbind(_,_,_)->
 	ok.
 
-handle_operation({Operation, _Session, Pdu},_From,#connection_state{logger = Logger} = State)->
-	?DEBUG(Logger, "Got ~p with params ~p",[Operation, dict:to_list(Pdu)]),
-	{reply, {ok, []}, State}.
+handle_operation({CmdName, _Session, Pdu},From,#connection_state{logger=Logger, link = Link} = State)->
+	?DEBUG(Logger, "Got operation ~p with ~p",[CmdName, dict:to_list(Pdu)]),
+	#link{id = LinkId} = Link,
+	spawn(
+		fun()->
+			router:route(LinkId, CmdName, Pdu, From)
+		end
+	),
+	{noreply, State}.
+
 
 handle_unbind(_,_,_)->
 	ok.
@@ -79,6 +90,11 @@ handle_cast({bound, Session}, State)->
 	NewState = State#connection_state{active=true, sessions = Session},
 	?DEBUG(Logger, "Session pid ~p", [Session]),
 	{noreply, NewState};
+handle_cast({bind_error, _}, #connection_state{link = Link, logger = Logger} = State)->
+	io:format("Self=~p",[self()]),
+	Res = timer:apply_after(1000, esme, bind, [self(), Link, Logger]),
+	io:format("Timer res ~p",[Res]),
+	{noreply, State};
 handle_cast(Message, State)->
 	#connection_state{
 		logger = Logger
@@ -86,17 +102,17 @@ handle_cast(Message, State)->
 	?DEBUG(Logger, "Unknow message ~p",[Message]),
 	{noreply, State}.
 
+handle_call(get_session, _From, #connection_state{sessions = Session, active = Active} = State)->
+	case Active of
+		true ->
+			{reply, Session, State};
+		_ ->
+			{reply, undefined, State}
+	end;
 handle_call(_, _From, State)->
+	io:format("Got default call"),
 	{reply, ok, State}.
 
-handle_info({packet, CmdName, Pdu, From},#connection_state{logger=Logger, sessions=Session} = State)->
-	?DEBUG(Logger, "Got ~p",[{packet, CmdName, Pdu}]),
-	ParamList = dict:to_list(Pdu),
-	{ok, RespDict} = gen_esme:submit_sm(Session, ParamList),
-	Resp = dict:to_list(RespDict),
-	?DEBUG(Logger, "~p ~p", [From, Resp]),
-	gen_server:reply(From,{ok, Resp}),
-	{noreply, State};
 handle_info(_,State)->
 	{noreply, State}.
 

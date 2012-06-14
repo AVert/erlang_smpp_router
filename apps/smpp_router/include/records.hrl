@@ -40,7 +40,8 @@
 	 	id,
 		in_id,
 		type,
-		out_id
+		out_id,
+		action :: 'pass' | 'drop'
 	}
 ).
 
@@ -48,6 +49,7 @@
 	message,
 	{
 		id,
-		pdu
+		source_link_id,
+		target_link_id
 	}
 ).
