@@ -63,6 +63,12 @@ init_db_tables()->
 			{attributes, record_info(fields, rule)},
 			{disc_copies, [node()]}
 		]
+	),
+	mnesia:create_table(
+		packet_counter,
+		[
+			{disc_copies, [node()]}
+		]
 	).
 
 add_dummy_connections()->

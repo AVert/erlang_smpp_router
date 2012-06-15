@@ -7,6 +7,8 @@
 -include_lib("oserl/include/oserl.hrl").
 	
 route(SourceModule, Link, CmdName, Pdu, From)->
+	PacketId = mnesia:dirty_update_counter(packet_counter, message_counter, 1),
+	?DEBUG(router, "Packet id is ~p", [PacketId]),
 	PduParams = dict:to_list(Pdu),
 	?DEBUG(router, "Link ~p ~p ~p",[Link, CmdName, PduParams]),
 	EsmClass = proplists:get_value(esm_class, PduParams),
@@ -29,8 +31,9 @@ route_delivery_receipt(SourceModule, Link, CmdName, PduParams, From)->
 				[Message] ->
 					?DEBUG(router, "Got message ~p",[Message]),
 					#message{source_link_id = SourceLinkId,target_link_id=TargetLinkId} = Message, 
-					route_packet_to_link(SourceModule, SourceLinkId, TargetLinkId, CmdName, PduParams, From);
+					route_packet_to_link(SourceModule, TargetLinkId, SourceLinkId, CmdName, PduParams, From);
 				_ ->
+					?DEBUG(router, "No message with such ID:~p", [MsgId]),
 					route_default(SourceModule, Link, CmdName, PduParams, From)
 			end;		
 		_ ->
@@ -49,14 +52,19 @@ route_default(SourceModule,Link, CmdName, PduParams, From)->
 		pass ->
 			route_packet_to_link(SourceModule, SourceLinkId, TargetLinkId, CmdName, PduParams, From);
 		_ ->
-			?DEBUG(router, ""),
-			gen_server:reply(From, {error, ?ESME_RSYSERR,[]})
+			?DEBUG(router, "Do not pass"),
+			gen_server:reply(From, {error, 8, PduParams})
 	end.
 	
 route_packet_to_link(SourceModule, SourceLinkId, TargetLinkId, CmdName, PduParams, From)->
 	Link = list_to_atom("channel_" ++ integer_to_list(TargetLinkId)),
 	?DEBUG(router,"Route message to link ~p",[TargetLinkId]),
-	SessionTuple = esme:get_session(Link),
+	case Link of
+		channel_3 ->
+			SessionTuple = esme:get_session(Link);
+		_ ->
+			SessionTuple = smsc:get_session(Link)
+	end,
 	?DEBUG(router, "Session of link ~p",[SessionTuple]),
 	case SessionTuple of
 		undefined ->
@@ -101,8 +109,8 @@ process_result(SourceLinkId, TargetLinkId, {ok, ResultPdu})->
 	save_message(SourceLinkId, TargetLinkId, ResultParams),
 	ResultParams;
 	
-process_result(_SourceLinkId, _TargetLinkId, {error, _Reason, ResultPdu})->
-	dict:to_list(ResultPdu).
+process_result(_SourceLinkId, _TargetLinkId, {error, _})->
+	[].
 
 	
 send_pdu_packet(smsc, esme, Session, submit_sm, Params)->
@@ -115,8 +123,8 @@ send_pdu_packet(esme, esme, Session, deliver_sm, Params)->
 	?DEBUG(router, "esme to esme with submit_sm"),
 	gen_esme:submit_sm(Session, Params);
 send_pdu_packet(esme, smsc, Session, deliver_sm, Params)->
-	?DEBUG(router, "esme to ыьыс with deliver_sm"),
-	gen_esme:deliver_sm(Session, Params).
+	?DEBUG(router, "esme to smsc with deliver_sm"),
+	gen_smsc:deliver_sm(Session, Params).
 	
 	
 save_message(SourceLinkId, TargetLinkId, PduParams)->
