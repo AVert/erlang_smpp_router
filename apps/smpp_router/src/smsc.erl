@@ -51,7 +51,7 @@ init(Params)->
 	State = #connection_state{
 		link = Link,
 		logger = Logger,
-		rules = Rules
+		active = false
 	},
 	Self = self(),
 	spawn(
@@ -81,7 +81,7 @@ handle_unbind({unbind, _Session, _Pdu}, _From, #connection_state{logger=Logger} 
 	NewState = State#connection_state{active=false},
     {reply, ok, NewState}.
 
-handle_bind({_CmdName, _Session, Pdu, _IpAddr}, _From, State)->
+handle_bind({_CmdName, Session, Pdu, IpAddr}, _From, State)->
 	#connection_state{
 		link=Link,
 		logger = Logger
@@ -92,6 +92,8 @@ handle_bind({_CmdName, _Session, Pdu, _IpAddr}, _From, State)->
 	SystemId = ConnectionData#connection_data.system_id,
 	Password = ConnectionData#connection_data.password,
 	BindParams = dict:to_list(Pdu),
+
+	?DEBUG(Logger, "Got bind from ~p",[IpAddr]),
 	
 	?DEBUG(Logger, "Got bind packet with ~p",[BindParams]),
 	
@@ -101,18 +103,20 @@ handle_bind({_CmdName, _Session, Pdu, _IpAddr}, _From, State)->
 	},
 	case BindAuth of
 		{SystemId, Password} ->
-			
+			erlang:monitor(process, Session),
+			NewState = State#connection_state{sessions = Session, active = true},
 			Result = {ok, [{system_id, SystemId},{password, Password}]};
 		_ ->
+			NewState = State,
 			Result = {error, ?ESME_RINVSYSID, []}
 	end,
 	?DEBUG(Logger, "Bind attempt with ~p",[Result]),
-	{reply, Result, State}.
+	{reply, Result, NewState}.
 
 handle_listen_error(#connection_state{logger = Logger} =State) ->
 	?INFO(Logger, "Got listen error"),
 	NewState = State#connection_state{active=false},
-    {noreply, NewState}.
+	{noreply, NewState}.
 
 %% gen_server functions
 handle_cast({listen, Activity}, State)->
@@ -131,6 +135,10 @@ handle_call(get_session, _From, #connection_state{sessions = Session, active = A
 handle_call(_, _From, State)->
 	{reply, ok, State}.
 
+handle_info({'DOWN',_,process,Session,Reason},#connection_state{logger = Logger, sessions = Session} = State )->
+	?ERROR(Logger, "Session is down with reason ~p",[Reason]),
+	NewState = State#connection_state{sessions = undefined, active = false},
+	{noreply, NewState};
 handle_info(_,State)->
 	{noreply, State}.
 

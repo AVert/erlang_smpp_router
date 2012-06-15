@@ -49,7 +49,8 @@ init(Params)->
 	?DEBUG(Logger,"Link options ~p",[Link]),
 	State = #connection_state{
 		link = Link,
-		logger = Logger
+		logger = Logger,
+		active = false
 	},
 	Self = self(),
 	spawn(fun()-> bind(Self, Link, Logger) end),
@@ -89,11 +90,10 @@ handle_cast({bound, Session}, State)->
 	} = State,
 	NewState = State#connection_state{active=true, sessions = Session},
 	?DEBUG(Logger, "Session pid ~p", [Session]),
+	erlang:monitor(process, Session),
 	{noreply, NewState};
 handle_cast({bind_error, _}, #connection_state{link = Link, logger = Logger} = State)->
-	io:format("Self=~p",[self()]),
-	Res = timer:apply_after(1000, esme, bind, [self(), Link, Logger]),
-	io:format("Timer res ~p",[Res]),
+	reconnect(self(), Link, Logger),
 	{noreply, State};
 handle_cast(Message, State)->
 	#connection_state{
@@ -113,6 +113,11 @@ handle_call(_, _From, State)->
 	io:format("Got default call"),
 	{reply, ok, State}.
 
+handle_info({'DOWN',_,process, Session, Reason}, #connection_state{sessions = Session, logger = Logger, link = Link} = State)->
+	?ERROR(Logger, "Session down with reason ~p", [Reason]),
+	NewState = State#connection_state{sessions = undefined, active = false},
+	reconnect(self(), Link, Logger),
+	{noreply, NewState};
 handle_info(_,State)->
 	{noreply, State}.
 
@@ -121,6 +126,10 @@ code_change(_,_,_)->
 
 terminate(_,_)->
 	ok.
+
+reconnect(Self, Link, Logger)->
+	?INFO(Logger, "Will try to reconnect"),
+	timer:apply_after(1000, esme, bind, [Self, Link, Logger]).
 
 
 bind(Self, Link, Logger) ->
