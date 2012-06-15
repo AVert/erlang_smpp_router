@@ -1,12 +1,12 @@
 -module(router).
 
--export([route/4]).
+-export([route/5]).
 
 -include("logger.hrl").
 -include("records.hrl").
 -include_lib("oserl/include/oserl.hrl").
 	
-route(Link, CmdName, Pdu, From)->
+route(SourceModule, Link, CmdName, Pdu, From)->
 	PduParams = dict:to_list(Pdu),
 	?DEBUG(router, "Link ~p ~p ~p",[Link, CmdName, PduParams]),
 	
@@ -17,146 +17,142 @@ route(Link, CmdName, Pdu, From)->
 	?DEBUG(router, "Old sequence id ~p",[OldSequenceId]),
 	
 	case EsmClass of
-		4 -> route_delivery_receipt(Link, CmdName, PduParams, From);
-		_ -> route_default(Link, CmdName, PduParams, From)
+		4 -> route_delivery_receipt(SourceModule, Link, CmdName, PduParams, From);
+		_ -> route_default(SourceModule, Link, CmdName, PduParams, From)
 	end.
 	
-route_delivery_receipt(Link, CmdName, PduParams, From)->
+route_delivery_receipt(_SourceModule, _Link, _CmdName, PduParams, _From)->
+	?DEBUG(router,"Routing delivery receipt"),
 	
-	io:format("Routing delivery receipt").
+	[MsgId, Date, Status] = process_message_text(PduParams),
 	
-route_default(Link, CmdName, PduParams, From)->
+	?DEBUG(router, "Got msg id ~p",[MsgId]),
+	
+	Message = mnesia:dirty_read(message, MsgId), 
+	
+	?DEBUG(router, "Got message ~p",[Message]).
+	
+	
+route_default(SourceModule,Link, CmdName, PduParams, From)->
 	#rule{
 		action = Action,
 		in_id = SourceLinkId,
 		out_id = TargetLinkId
 	} = get_rule(Link, CmdName),
-	io:format("Action is ~p",[Action]),
+	?DEBUG(router, "Action ~p",[Action]),
 	case Action of
 		pass ->
-			ok;
-		drop ->
+			route_packet_to_link(SourceModule, SourceLinkId, TargetLinkId, CmdName, PduParams, From);
+		_ ->
 			?DEBUG(router, ""),
-			gen_smsc:reply(From, {error, ?ESME_RSYSERR,[]})
+			gen_server:reply(From, {error, ?ESME_RSYSERR,[]})
 	end.
+	
+route_packet_to_link(SourceModule, SourceLinkId, TargetLinkId, CmdName, PduParams, From)->
+	Link = list_to_atom("channel_" ++ integer_to_list(TargetLinkId)),
+	?DEBUG(router,"Route message to link ~p",[TargetLinkId]),
+	SessionTuple = esme:get_session(Link),
+	?DEBUG(router, "Session of link ~p",[SessionTuple]),
+	case SessionTuple of
+		undefined ->
+			gen_server:reply(From, {error, ?ESME_RSYSERR, []});
+		{Session, TargetModule} ->
+			Result = send_packet(SourceModule, SourceLinkId, TargetModule, TargetLinkId, Session, CmdName, PduParams),
+			?DEBUG(router, "Will send result ~p",[Result]),
+			case Result of
+				{ok, ResultParams} ->
+					gen_server:reply(From, {ok, ResultParams});
+				{error, Err, ResultParams} ->
+					gen_server:reply(From, {error, Err, ResultParams})
+			end
+	end.		
+	
+send_packet(SourceModule, SourceLinkId, TargetModule, TargetLinkId ,Session, CmdName, PduParams)->
+	OldSequenceNumber = proplists:get_value(sequence_number, PduParams),
+
+	NewPduParams = [Z || {X, _} = Z <- PduParams, X =/= sequence_number],
+	
+	?DEBUG("Send ~p with ~p",[CmdName, NewPduParams]),
+	
+	Result = send_pdu_packet(SourceModule, TargetModule, Session, CmdName, PduParams),
+
+	?DEBUG(router, "Got result ~p",[Result]),
+
+	ResultParams = process_result(SourceLinkId, TargetLinkId, Result),
+	
+	ResultPduParams = lists:map(
+		fun
+			({sequence_number, _}) -> 
+				{sequence_number, OldSequenceNumber};
+			({Key, Value}) ->
+				{Key, Value}
+		end, 
+		ResultParams
+	),
+	case Result of
+		{ok, _} ->
+			{ok, ResultPduParams};
+		{error, Err, _ } ->
+			{error, Err, ResultPduParams}
+	end.
+	
+	
+process_result(SourceLinkId, TargetLinkId, {ok, ResultPdu})->
+	ResultParams = dict:to_list(ResultPdu),
+	save_message(SourceLinkId, TargetLinkId, ResultParams),
+	ResultParams;
+	
+process_result(_SourceLinkId, _TargetLinkId, {error, _Reason, ResultPdu})->
+	dict:to_list(ResultPdu).
+
+	
+send_pdu_packet(smsc, esme, Session, submit_sm, Params)->
+	?DEBUG(router, "smsc to esme with submit_sm"),
+	gen_esme:submit_sm(Session, Params);
+send_pdu_packet(smsc, smsc, Session, submit_sm, Params)->
+	?DEBUG(router, "smsc to smsc with deliver_sm"),
+	gen_smsc:deliver_sm(Session, Params);
+send_pdu_packet(esme, esme, Session, deliver_sm, Params)->
+	?DEBUG(router, "esme to esme with submit_sm"),
+	gen_esme:submit_sm(Session, Params);
+send_pdu_packet(esme, smsc, Session, deliver_sm, Params)->
+	?DEBUG(router, "esme to ыьыс with deliver_sm"),
+	gen_esme:deliver_sm(Session, Params).
+	
+	
+save_message(SourceLinkId, TargetLinkId, PduParams)->
+	MessageId = proplists:get_value(message_id, PduParams),
+	
+	Msg = #message{
+		id = MessageId,
+		source_link_id = SourceLinkId,
+		target_link_id = TargetLinkId
+	},
+	
+	?DEBUG(router, "Msg ~p",[Msg]),
+	
+	ok = mnesia:dirty_write(message, Msg).
 	
 get_rule(Link, CmdName)->
 	Rules = mnesia:dirty_match_object(#rule{in_id=Link, type = CmdName, _ = '_'}),
 	case Rules of
 		[] -> #rule{action=drop};
 		[Rule] -> Rule;
-		[Head|Tail] -> Head
+		[Head|_] -> Head
 	end.
 	
 %%find_message_by_id(MsgId)->
 %%	ok.
 	
-%%process_message_text(Pdu)->
-%%	Msg = proplists:get_value(short_message,Pdu),
-%%	Pattern = "^id:(\\d+) sub:.* done date:(\\d+) stat:(\\w+) err:",
-%%	Options = [global,{capture,all_but_first,list}],
-%%	Res = 
-%%		case re:run(Msg,Pattern,Options) of
-%%			{match,[List]} ->
-%%				List;
-%%			_ ->
-%%				[undefined,now(),undefined]
-%%		end,
-%%	Res.
-
-
-%%route(Link, CmdName = submit_sm, Pdu, From)->
-%%	io:format("Got ~p from ~p~n",[CmdName, Link]),
-%%	[Rule] = mnesia:dirty_match_object(#rule{in_id=Link, type = CmdName, _ = '_'}),
-%%	#rule{out_id = OutId} = Rule,
-%%	ChannelName = list_to_atom("channel_" ++ integer_to_list(OutId)),
-%%	
-%%	Session = esme:get_session(ChannelName),
-%%	
-%%	io:format("Session ~p~n",[Session]),
-%%	
-%%	if 
-%%		Session =:= undefined ->
-%%			gen_esme:reply(From, {error, 8,[]});
-%%		true ->
-%%			ok
-%%	end,
-%%	
-%%	PduParams = dict:to_list(Pdu),
-%%
-%%	OldSequenceNumber = proplists:get_value(sequence_number, PduParams),
-%%	
-%%	NewPduParams = [Z || {X, _} = Z <- PduParams, X =/= sequence_number],
-%%	
-%%	{ok,Result} = gen_esme:submit_sm(Session, NewPduParams),
-%%	
-%%	ResultParams = dict:to_list(Result),
-%%	
-%%	MessageId = proplists:get_value(message_id, ResultParams),
-%%	
-%%	Msg = #message{
-%%		id = MessageId,
-%%		source_link_id = Link,
-%%		target_link_id = OutId
-%%	},
-%%	
-%%	io:format("Msg ~p~n",[Msg]),
-%%	
-%%	mnesia:dirty_write(message, Msg),
-%%	
-%%	
-%%	NewResultParams = lists:map(
-%%		fun
-%%			({sequence_number, _}) -> 
-%%				{sequence_number, OldSequenceNumber};
-%%			({Key, Value}) ->
-%%				{Key, Value}
-%%		end, 
-%%		ResultParams
-%%	),
-%%	
-%%	io:format("Result ~p~n",[NewResultParams]),
-%%	
-%%	gen_esme:reply(From, {ok, NewResultParams}),
-%%	
-%%	ok;
-%%route(_Link, deliver_sm, Pdu, From)->
-%%	Params = dict:to_list(Pdu),
-%%	
-%%	[MessageId, DoneDate, Stat] = process_message_text(Params),
-%%	
-%%	io:format("Got ~p~n with ~p ~p ~p~n",[Params, MessageId, DoneDate, Stat]),
-%%	
-%%	Msg = mnesia:dirty_read(message, MessageId),
-%%	
-%%	case Msg of
-%%		[] -> gen_esme:reply(From, {ok, []});
-%%		_ -> ok
-%%	end,
-%%	
-%%	#message{source_link_id = Id} = Msg,
-%%	
-%%	ChannelAtom = list_to_atom("channel_"++integer_to_list(Id)),
-%%	
-%%	Res1 = gen_smsc:deliver_sm(ChannelAtom, Params),
-%%	
-%%	io:format("Reply with ~p~n",[Res1]),
-%%	
-%%	Res = gen_esme:reply(From, {ok, []}),
-%%	
-%%	io:format("Reply with ~p~n",[Res]),
-%%	ok.
-
-
-
-
-send_packet(smsc, esme, Session, submit_sm, Params)->
-	gen_esme:submit_sm(Session, Params);
-send_packet(smsc, smsc, Session, submit_sm, Params)->
-	gen_smsc:deliver_sm(Session, Params);
-send_packet(esme, esme, Session, deliver_sm, Params)->
-	gen_esme:submit_sm(Session, Params);
-send_packet(esme, smsc, Session, deliver_sm, Params)->
-	gen_esme:deliver_sm(Session, Params).
-
-
+process_message_text(Pdu)->
+	Msg = proplists:get_value(short_message,Pdu),
+	Pattern = "^id:(\\d+) sub:.* done date:(\\d+) stat:(\\w+) err:",
+	Options = [global,{capture,all_but_first,list}],
+	Res = 
+		case re:run(Msg,Pattern,Options) of
+			{match,[List]} ->
+				List;
+			_ ->
+				[undefined,now(),undefined]
+		end,
+	Res.

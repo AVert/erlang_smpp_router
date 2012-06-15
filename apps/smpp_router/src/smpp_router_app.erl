@@ -107,7 +107,7 @@ add_dummy_connections()->
 		in_id = 1,
 		type = submit_sm,
 		out_id = 3,
-		action = drop
+		action = pass
 	},
 	mnesia:dirty_write(rule, R),
 	R1 = #rule{

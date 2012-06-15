@@ -67,7 +67,7 @@ handle_operation({CmdName, _Session, Pdu},From,#connection_state{logger=Logger, 
 	#link{id = LinkId} = Link,
 	spawn(
 		fun()->
-			router:route(LinkId, CmdName, Pdu, From)
+			router:route(?MODULE, LinkId, CmdName, Pdu, From)
 		end
 	),
 	{noreply, State}.
@@ -105,7 +105,7 @@ handle_cast(Message, State)->
 handle_call(get_session, _From, #connection_state{sessions = Session, active = Active} = State)->
 	case Active of
 		true ->
-			{reply, Session, State};
+			{reply, {Session, ?MODULE}, State};
 		_ ->
 			{reply, undefined, State}
 	end;
