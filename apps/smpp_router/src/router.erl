@@ -9,28 +9,33 @@
 route(SourceModule, Link, CmdName, Pdu, From)->
 	PduParams = dict:to_list(Pdu),
 	?DEBUG(router, "Link ~p ~p ~p",[Link, CmdName, PduParams]),
-	
 	EsmClass = proplists:get_value(esm_class, PduParams),
 	?DEBUG(router, "Esm class ~p",[EsmClass]),
-	
 	OldSequenceId = proplists:get_value(sequence_number, PduParams),
 	?DEBUG(router, "Old sequence id ~p",[OldSequenceId]),
-	
 	case EsmClass of
 		4 -> route_delivery_receipt(SourceModule, Link, CmdName, PduParams, From);
 		_ -> route_default(SourceModule, Link, CmdName, PduParams, From)
 	end.
 	
-route_delivery_receipt(_SourceModule, _Link, _CmdName, PduParams, _From)->
+route_delivery_receipt(SourceModule, Link, CmdName, PduParams, From)->
 	?DEBUG(router,"Routing delivery receipt"),
-	
-	[MsgId, Date, Status] = process_message_text(PduParams),
-	
-	?DEBUG(router, "Got msg id ~p",[MsgId]),
-	
-	Message = mnesia:dirty_read(message, MsgId), 
-	
-	?DEBUG(router, "Got message ~p",[Message]).
+	ProcessResult = process_message_text(PduParams),
+	case ProcessResult of
+		[MsgId, _, _] ->
+			?DEBUG(router, "Got msg id ~p",[MsgId]),
+			MessageRaw = mnesia:dirty_read(message, MsgId),
+			case MessageRaw of
+				[Message] ->
+					?DEBUG(router, "Got message ~p",[Message]),
+					#message{source_link_id = SourceLinkId,target_link_id=TargetLinkId} = Message, 
+					route_packet_to_link(SourceModule, SourceLinkId, TargetLinkId, CmdName, PduParams, From);
+				_ ->
+					route_default(SourceModule, Link, CmdName, PduParams, From)
+			end;		
+		_ ->
+			route_default(SourceModule, Link, CmdName, PduParams, From)
+	end.
 	
 	
 route_default(SourceModule,Link, CmdName, PduParams, From)->
@@ -69,17 +74,11 @@ route_packet_to_link(SourceModule, SourceLinkId, TargetLinkId, CmdName, PduParam
 	
 send_packet(SourceModule, SourceLinkId, TargetModule, TargetLinkId ,Session, CmdName, PduParams)->
 	OldSequenceNumber = proplists:get_value(sequence_number, PduParams),
-
 	NewPduParams = [Z || {X, _} = Z <- PduParams, X =/= sequence_number],
-	
 	?DEBUG("Send ~p with ~p",[CmdName, NewPduParams]),
-	
 	Result = send_pdu_packet(SourceModule, TargetModule, Session, CmdName, PduParams),
-
 	?DEBUG(router, "Got result ~p",[Result]),
-
 	ResultParams = process_result(SourceLinkId, TargetLinkId, Result),
-	
 	ResultPduParams = lists:map(
 		fun
 			({sequence_number, _}) -> 
@@ -122,15 +121,12 @@ send_pdu_packet(esme, smsc, Session, deliver_sm, Params)->
 	
 save_message(SourceLinkId, TargetLinkId, PduParams)->
 	MessageId = proplists:get_value(message_id, PduParams),
-	
 	Msg = #message{
 		id = MessageId,
 		source_link_id = SourceLinkId,
 		target_link_id = TargetLinkId
 	},
-	
 	?DEBUG(router, "Msg ~p",[Msg]),
-	
 	ok = mnesia:dirty_write(message, Msg).
 	
 get_rule(Link, CmdName)->
@@ -140,9 +136,6 @@ get_rule(Link, CmdName)->
 		[Rule] -> Rule;
 		[Head|_] -> Head
 	end.
-	
-%%find_message_by_id(MsgId)->
-%%	ok.
 	
 process_message_text(Pdu)->
 	Msg = proplists:get_value(short_message,Pdu),
