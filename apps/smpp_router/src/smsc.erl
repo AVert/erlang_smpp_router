@@ -54,7 +54,7 @@ init(Params)->
 		active = false
 	},
 	Self = self(),
-	spawn(
+	proc_lib:spawn(
 		fun()->
 			Connection_data = Link#link.connection_data,
 			Port = Connection_data#connection_data.port,
@@ -74,11 +74,15 @@ handle_operation({CmdName, _Session, Pdu},From,#connection_state{logger=Logger, 
 			router:route(?MODULE, LinkId, CmdName, Pdu, From)
 		end
 	),
+	{noreply, State};
+handle_operation(BadCommand,_From,State)->
+	io:format("Got bad command~p",[BadCommand]),
 	{noreply, State}.
+
 
 handle_unbind({unbind, _Session, _Pdu}, _From, #connection_state{logger=Logger} = State) -> 
 	?INFO(Logger, "Got unbind"),
-	NewState = State#connection_state{active=false},
+	NewState = State#connection_state{sessions=undefined, active=false},
     {reply, ok, NewState}.
 
 handle_bind({_CmdName, Session, Pdu, IpAddr}, _From, State)->

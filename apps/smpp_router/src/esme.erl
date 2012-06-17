@@ -66,7 +66,7 @@ handle_outbind(_,_,_)->
 handle_operation({CmdName, _Session, Pdu},From,#connection_state{logger=Logger, link = Link} = State)->
 	?DEBUG(Logger, "Got operation ~p with ~p",[CmdName, dict:to_list(Pdu)]),
 	#link{id = LinkId} = Link,
-	spawn(
+	proc_lib:spawn(
 		fun()->
 			router:route(?MODULE, LinkId, CmdName, Pdu, From)
 		end
